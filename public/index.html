@@ -97,8 +97,17 @@
   .rail.second{margin-top:4px}
   .rail .fill{height:100%;border-radius:999px;transition:width .6s ease-out}
 
+  /* ---------- Manual run log ---------- */
+  .log-run{margin-top:10px;text-align:center}
+  .log-run-btn{display:inline-block;background:none;border:0;padding:0;font:inherit;font-size:10.5px;font-weight:800;color:var(--faint);cursor:pointer;letter-spacing:.04em;text-transform:uppercase}
+  .log-run-btn:hover{color:var(--eyebrow)}
+  .log-run-form{display:flex;gap:6px;margin-top:8px;flex-wrap:wrap;justify-content:center}
+  .log-run-form input{width:64px;border:1px solid var(--border);border-radius:8px;padding:5px 7px;font:inherit;font-size:12px;color:var(--ink2);background:var(--surface)}
+  .log-run-form input.lr-date{width:118px}
+  .log-run-form button{border:0;border-radius:8px;padding:5px 10px;font:inherit;font-size:12px;font-weight:800;background:var(--accent);color:#fff;cursor:pointer}
+
   /* ---------- Garmin CSV import ---------- */
-  .import-link{display:block;text-align:center;margin-top:10px;font-size:10.5px;font-weight:800;color:var(--faint);cursor:pointer;letter-spacing:.04em;text-transform:uppercase}
+  .import-link{display:block;text-align:center;margin-top:8px;font-size:10.5px;font-weight:800;color:var(--faint);cursor:pointer;letter-spacing:.04em;text-transform:uppercase}
   .import-link:hover{color:var(--eyebrow)}
   .import-link.error{color:var(--red)}
   .metric-card.drop-target{border-color:var(--accent);box-shadow:0 8px 26px -16px rgba(224,122,79,.55)}
@@ -162,9 +171,13 @@ function fresh(file) {
   return file;
 }
 
-// Garmin can arrive two ways: data/garmin-data.js (written by sync_garmin.py)
-// or an in-browser CSV import stored in localStorage. Use whichever is newer.
+// Garmin can arrive three ways, in priority order: a manual daily log kept
+// in localStorage, an in-browser CSV import (also localStorage), or
+// data/garmin-data.js (written by sync_garmin.py).
 function garminSource() {
+  const manual = buildManualRunPayload(lastNDays(7));
+  if (manual) return fresh(manual);
+
   let imported = null;
   try { imported = JSON.parse(localStorage.getItem('garminImport')); } catch {}
   const file = window.GARMIN_DATA;
@@ -229,12 +242,9 @@ function buildGarminPayload(csvText, lastModified) {
     throw new Error("That doesn't look like a Garmin Activities.csv");
   }
 
-  const today = new Date();
-  const days = [];
-  for (let i = 6; i >= 0; i--) {
-    const d = new Date(today); d.setDate(d.getDate() - i); days.push(d);
-  }
+  const days = lastNDays(7);
   const kmByDay = Object.fromEntries(days.map(d => [dateKey(d), 0]));
+  const todayKey = dateKey(new Date());
   let todayKm = 0, todaySecs = 0, todayKcal = 0;
 
   for (const r of rows) {
@@ -243,7 +253,7 @@ function buildGarminPayload(csvText, lastModified) {
     if (!(key in kmByDay)) continue;
     const km = csvNum(r[iDist]);
     kmByDay[key] += km;
-    if (key === dateKey(today)) {
+    if (key === todayKey) {
       todayKm += km;
       todaySecs += csvSecs(r[iTime]);
       todayKcal += csvNum(r[iCal]);
@@ -280,6 +290,72 @@ async function importGarminFile(file) {
       link.textContent = err.message || 'Import failed';
     }
   }
+}
+
+/* =========================================================================
+ * MANUAL RUN LOG (typed in each day, stored in localStorage)
+ * ========================================================================= */
+
+function lastNDays(n) {
+  const today = new Date();
+  const days = [];
+  for (let i = n - 1; i >= 0; i--) { const d = new Date(today); d.setDate(d.getDate() - i); days.push(d); }
+  return days;
+}
+
+function readManualRunLog() {
+  try { return JSON.parse(localStorage.getItem('garminManualLog')) || {}; }
+  catch { return {}; }
+}
+
+// Builds the same payload shape as the CSV/file sources, but from whatever
+// daily entries the user has typed in. Returns null once no entries exist
+// at all, so garminSource() can fall back to CSV import / synced file.
+function buildManualRunPayload(days) {
+  const log = readManualRunLog();
+  const keys = Object.keys(log);
+  if (!keys.length) return null;
+
+  const kmByDay = Object.fromEntries(days.map(d => [dateKey(d), 0]));
+  const todayKey = dateKey(new Date());
+  let todayKm = 0, todaySecs = 0, todayKcal = 0;
+
+  for (const d of days) {
+    const key = dateKey(d);
+    const entry = log[key];
+    if (!entry) continue;
+    kmByDay[key] += entry.km;
+    if (key === todayKey) {
+      todayKm += entry.km;
+      todaySecs += entry.secs || 0;
+      todayKcal += entry.kcal || 0;
+    }
+  }
+
+  const weeklyKm = Object.values(kmByDay).reduce((a, b) => a + b, 0);
+  const maxKm = Math.max(...Object.values(kmByDay));
+  const lastLoggedDate = keys.sort().pop(); // most recent entry, logged or not this week
+
+  return {
+    fetchedAt: new Date(`${lastLoggedDate}T23:59:59`).toISOString(),
+    value: todayKm > 0 ? todayKm.toFixed(1) : '0',
+    unit: 'km today',
+    sub: todayKm > 0
+      ? `Avg pace ${fmtPace(todaySecs / todayKm)} /km · ${Math.round(todayKcal)} kcal`
+      : `No run yet today · ${weeklyKm.toFixed(1)} km this week`,
+    score: Math.min(100, Math.round(100 * weeklyKm / CONFIG.weeklyGoalKm)),
+    processScore: Math.min(100, Math.round(100 * weeklyKm / CONFIG.weeklyGoalKm)),
+    goalScore: Math.min(100, Math.round(100 * weeklyKm / CONFIG.weeklyGoalKm)),
+    bars: days.map(d => maxKm ? Math.round(100 * kmByDay[dateKey(d)] / maxKm) : 0),
+    days: days.map(d => 'SMTWTFS'[d.getDay()]),
+  };
+}
+
+function logManualRun({ date, km, time, kcal }) {
+  const log = readManualRunLog();
+  log[date] = { km, secs: time ? csvSecs(time) : 0, kcal: kcal || 0 };
+  localStorage.setItem('garminManualLog', JSON.stringify(log));
+  boot(); // re-render with the new entry
 }
 
 /* =========================================================================
@@ -386,8 +462,18 @@ function metricCardHTML(key, s) {
     </div>
   `).join('');
 
-  const importLink = key === 'run' ? `
-    <label class="import-link"><span>Import Activities.csv</span>
+  const logRun = key === 'run' ? `
+    <div class="log-run">
+      <button class="log-run-btn" type="button">+ Log a run</button>
+      <form class="log-run-form" hidden>
+        <input class="lr-date" type="date" value="${dateKey(new Date())}" required>
+        <input class="lr-km" type="number" step="0.1" min="0" placeholder="km" required>
+        <input class="lr-time" type="text" placeholder="mm:ss">
+        <input class="lr-kcal" type="number" min="0" placeholder="kcal">
+        <button type="submit">Save</button>
+      </form>
+    </div>
+    <label class="import-link"><span>or import Activities.csv</span>
       <input type="file" accept=".csv,text/csv" hidden>
     </label>` : '';
 
@@ -406,7 +492,7 @@ function metricCardHTML(key, s) {
     </div>
     <div class="metric-sub ${synced ? '' : 'stale'}">${synced ? esc(s.sub) : 'Not synced'}</div>
     <div class="bars">${bars}</div>
-    ${importLink}
+    ${logRun}
   </div>`;
 }
 
@@ -525,6 +611,28 @@ function wireGarminImport(app) {
   });
 }
 
+// Manual run-log form: click toggles it open, submit saves the entry and
+// re-renders. Delegated on #app so it survives boot()'s re-render.
+function wireManualRunLog(app) {
+  app.addEventListener('click', e => {
+    if (!e.target.matches('.log-run-btn')) return;
+    const form = e.target.nextElementSibling;
+    form.hidden = !form.hidden;
+    if (!form.hidden) form.querySelector('.lr-km').focus();
+  });
+  app.addEventListener('submit', e => {
+    if (!e.target.matches('.log-run-form')) return;
+    e.preventDefault();
+    const form = e.target;
+    logManualRun({
+      date: form.querySelector('.lr-date').value,
+      km: parseFloat(form.querySelector('.lr-km').value) || 0,
+      time: form.querySelector('.lr-time').value.trim(),
+      kcal: parseFloat(form.querySelector('.lr-kcal').value) || 0,
+    });
+  });
+}
+
 function animateIn(root) {
   requestAnimationFrame(() => requestAnimationFrame(() => {
     root.querySelectorAll('.progress[data-target]').forEach(el => { el.style.strokeDashoffset = el.dataset.target; });
@@ -550,6 +658,7 @@ async function boot() {
 }
 
 wireGarminImport(document.getElementById('app'));
+wireManualRunLog(document.getElementById('app'));
 boot();
 
 if ('serviceWorker' in navigator) {
