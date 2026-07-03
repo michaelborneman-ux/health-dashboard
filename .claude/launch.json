@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "health-dashboard",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["-m", "http.server", "8741", "--directory", "C:\\Users\\micha\\OneDrive - M.E.T. Utilities Management Ltd\\Current Projects\\Health Dashboard\\public"],
+      "port": 8741
+    }
+  ]
+}
