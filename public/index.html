@@ -373,13 +373,25 @@ function statusLabel(score) {
 const processOf = s => s.processScore ?? s.score;
 const goalOf = s => s.goalScore ?? s.score;
 
+// Mirrors the weighting scheme from the old health-dashboard's daily score
+// (public/app.js compositeScore): missing sources drop out and the rest
+// re-normalize, so a source that hasn't synced never drags the score down.
+const PROCESS_WEIGHTS = { sleep: 0.3, cal: 0.3, run: 0.25, weight: 0.15 };
+
 function derive(data) {
+  let total = 0, weightSum = 0;
+  for (const [key, s] of Object.entries(data.sources)) {
+    if (s == null) continue;
+    const w = PROCESS_WEIGHTS[key];
+    total += processOf(s) * w;
+    weightSum += w;
+  }
+  const process = weightSum ? Math.round(total / weightSum) : 0;
+
   const active = Object.values(data.sources).filter(s => s != null);
-  const avg = fn => active.length
-    ? Math.round(active.reduce((sum, s) => sum + fn(s), 0) / active.length)
+  const goals = active.length
+    ? Math.round(active.reduce((sum, s) => sum + goalOf(s), 0) / active.length)
     : 0;
-  const process = avg(processOf);
-  const goals = avg(goalOf);
   return {
     process, goals,
     processLabel: statusLabel(process),

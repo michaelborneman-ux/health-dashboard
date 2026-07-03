@@ -1,7 +1,7 @@
 // Service worker: cache the app shell for offline launch.
 // Relative URLs so it works whether served from the domain root (local) or a
 // project subpath (GitHub Pages). Bump CACHE on any shell change.
-const CACHE = "health-dashboard-v2";
+const CACHE = "health-dashboard-v3";
 const SHELL = [
   "./",
   "./index.html",
