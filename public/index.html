@@ -134,7 +134,6 @@
 
 <script src="data/garmin-data.js"></script>
 <script src="data/withings-data.js"></script>
-<script src="data/calories-data.js"></script>
 <script>
 /* =========================================================================
  * DATA LAYER
@@ -151,6 +150,7 @@ const CONFIG = {
   dailyGoalKm: 2.5,         // running process score = today's km vs this goal
   paceGoalSecPerKm: 300,    // running goal score = pace vs this target (5:00/km = 100)
   pacePenaltyPerMin: 20,    // -20 pts per additional minute/km slower than the target
+  caloriesGistId: 'ccb31ba8d954b8c444300c0f1ee69ce2', // CalorieSnap's auto-synced gist
 };
 
 const SOURCE_META = {
@@ -162,8 +162,8 @@ const SOURCE_META = {
 
 // Running comes from data/garmin-data.js (written by sync_garmin.py).
 // Sleep + Weight come from data/withings-data.js (written by sync_withings.py).
-// Calories comes from data/calories-data.js (written by sync_calories.py,
-// fed by the CalorieSnap PWA via a GitHub gist).
+// Calories is fetched live from CalorieSnap's auto-synced gist (see
+// fetchCaloriesLive below) — no local sync step needed.
 // Data older than 48h counts as stale → "Not synced".
 const STALE_MS = 48 * 60 * 60 * 1000;
 
@@ -171,6 +171,84 @@ function fresh(file) {
   if (!file || !file.fetchedAt) return null;
   if (Date.now() - new Date(file.fetchedAt).getTime() > STALE_MS) return null;
   return file;
+}
+
+/* =========================================================================
+ * CALORIES (live from CalorieSnap's auto-synced GitHub gist — no local
+ * sync/push step; CalorieSnap pushes on every save, we just read it fresh
+ * on each page load)
+ * ========================================================================= */
+
+const CALORIE_GIST_FILE = 'caloriesnap-summary.json';
+const CALORIES_CACHE_KEY = 'caloriesLiveCache';
+
+function calorieDayScore(calories, goal) {
+  if (!goal) return null;
+  const deviation = Math.abs(calories - goal) / goal;
+  return Math.max(0, Math.round(100 - 200 * deviation));
+}
+
+function buildCaloriesPayload(summary) {
+  const goal = summary.goal;
+  const byDate = Object.fromEntries((summary.days || []).map(d => [d.date, d.calories]));
+  const days = lastNDays(7);
+  const week = days.map(d => byDate[dateKey(d)] || 0);
+  const todayCal = week[week.length - 1];
+
+  // Process: adherence of completed, logged days to the goal (today is
+  // partial; unlogged days are skipped — no entry more likely means
+  // "didn't log" than "didn't eat").
+  const history = week.slice(0, -1)
+    .filter(c => c > 0)
+    .map(c => calorieDayScore(c, goal))
+    .filter(s => s != null);
+  const process = history.length ? Math.round(history.reduce((a, b) => a + b, 0) / history.length) : 50;
+
+  // Goal: today's budget — full marks while within goal, penalized when over.
+  const goalScore = goal
+    ? Math.max(0, Math.round(100 - 200 * Math.max(0, todayCal / goal - 1)))
+    : 50;
+
+  let sub, unit;
+  if (goal) {
+    const remaining = goal - todayCal;
+    sub = remaining >= 0 ? `${remaining} kcal remaining today` : `${-remaining} kcal over goal today`;
+    unit = `in / goal ${goal.toLocaleString()}`;
+  } else {
+    sub = 'No daily goal set in CalorieSnap';
+    unit = 'kcal in';
+  }
+
+  const mx = Math.max(...week);
+  return {
+    fetchedAt: summary.generatedAt || new Date().toISOString(),
+    value: todayCal.toLocaleString(),
+    unit,
+    sub,
+    score: process,
+    processScore: process,
+    goalScore,
+    bars: week.map(c => mx ? Math.round(100 * c / mx) : 0),
+    days: days.map(d => 'SMTWTFS'[d.getDay()]),
+  };
+}
+
+// Falls back to the last successful fetch (cached locally) if offline or
+// the gist request fails, so a flaky connection doesn't just blank the card.
+async function fetchCaloriesLive() {
+  try {
+    const resp = await fetch(`https://api.github.com/gists/${CONFIG.caloriesGistId}`, { cache: 'no-store' });
+    if (!resp.ok) throw new Error(`gist fetch failed (${resp.status})`);
+    const gist = await resp.json();
+    const file = gist.files && gist.files[CALORIE_GIST_FILE];
+    if (!file) throw new Error('summary file missing from gist');
+    const summary = JSON.parse(file.content);
+    const payload = buildCaloriesPayload(summary);
+    localStorage.setItem(CALORIES_CACHE_KEY, JSON.stringify(payload));
+    return payload;
+  } catch {
+    try { return JSON.parse(localStorage.getItem(CALORIES_CACHE_KEY)); } catch { return null; }
+  }
 }
 
 // Garmin can arrive three ways, in priority order: a manual daily log kept
@@ -190,12 +268,13 @@ function garminSource() {
 
 async function fetchDashboardData() {
   const withings = fresh(window.WITHINGS_DATA);
+  const calories = await fetchCaloriesLive();
   return {
     sources: {
       run: garminSource(),
       sleep:  withings ? withings.sleep : null,
       weight: withings ? withings.weight : null,
-      cal:    fresh(window.CALORIES_DATA),
+      cal:    fresh(calories),
     },
     // Placeholder trend until per-day history accumulates.
     weekScores: {
