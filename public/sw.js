@@ -1,7 +1,7 @@
 // Service worker: cache the app shell for offline launch.
 // Relative URLs so it works whether served from the domain root (local) or a
 // project subpath (GitHub Pages). Bump CACHE on any shell change.
-const CACHE = "health-dashboard-v4";
+const CACHE = "health-dashboard-v6";
 const SHELL = [
   "./",
   "./index.html",
@@ -35,6 +35,26 @@ self.addEventListener("fetch", (event) => {
 
   const url = new URL(request.url);
   if (url.origin !== self.location.origin) return;
+
+  // data/*.js changes on its own schedule (each sync + push), independent of
+  // app-shell deploys, so it must never go stale behind a cache-first hit.
+  // Network-first with a cache fallback keeps it fresh online and available
+  // offline.
+  if (url.pathname.includes("/data/")) {
+    // no-store: bypass the browser's own HTTP cache too, not just ours —
+    // otherwise a stale disk-cached response can win even on network-first.
+    event.respondWith(
+      fetch(request.url, { cache: "no-store" })
+        .then((resp) => {
+          if (resp.ok) {
+            caches.open(CACHE).then((cache) => cache.put(request, resp.clone()));
+          }
+          return resp;
+        })
+        .catch(() => caches.match(request)),
+    );
+    return;
+  }
 
   event.respondWith(
     caches.match(request).then(
