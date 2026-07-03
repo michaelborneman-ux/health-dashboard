@@ -1,19 +1,19 @@
 window.CALORIES_DATA = {
-  "fetchedAt": "2026-07-03T02:24:48.275Z",
-  "value": "2,025",
+  "fetchedAt": "2026-07-03T02:45:43.521Z",
+  "value": "2,250",
   "unit": "in / goal 2,100",
-  "sub": "75 kcal remaining today",
+  "sub": "150 kcal over goal today",
   "score": 59,
   "processScore": 59,
-  "goalScore": 100,
+  "goalScore": 86,
   "bars": [
-    46,
+    43,
     0,
     0,
-    90,
+    83,
     0,
-    100,
-    97
+    93,
+    100
   ],
   "days": [
     "F",

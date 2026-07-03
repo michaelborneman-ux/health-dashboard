@@ -1,18 +1,20 @@
 window.WITHINGS_DATA = {
-  "fetchedAt": "2026-07-02T14:37:35",
+  "fetchedAt": "2026-07-02T22:40:54",
   "sleep": {
-    "value": "9h 04m",
+    "value": "0h 10m",
     "unit": "",
-    "sub": "Deep 0h 12m \u00b7 96% efficiency",
-    "score": 98,
+    "sub": "Deep 0h 06m \u00b7 21% efficiency",
+    "score": 12,
+    "processScore": 26,
+    "goalScore": 12,
     "bars": [
       0,
       0,
       0,
       0,
-      10,
-      7,
-      100
+      100,
+      69,
+      19
     ],
     "days": [
       "F",
@@ -29,6 +31,8 @@ window.WITHINGS_DATA = {
     "unit": "kg",
     "sub": "+1.7 kg this week \u00b7 goal 80",
     "score": 29,
+    "processScore": 0,
+    "goalScore": 29,
     "bars": [
       70,
       70,
