@@ -148,7 +148,9 @@ const CONFIG = {
   userName: 'Michael',
   accent: '#e07a4f',        // alternates: #c9736a, #5fa06a, #7b74c9
   encouragement: true,
-  dailyGoalKm: 2.5,         // running sub-score = today's km vs this goal
+  dailyGoalKm: 2.5,         // running process score = today's km vs this goal
+  paceGoalSecPerKm: 300,    // running goal score = pace vs this target (5:00/km = 100)
+  pacePenaltyPerMin: 20,    // -20 pts per additional minute/km slower than the target
 };
 
 const SOURCE_META = {
@@ -232,6 +234,20 @@ const csvSecs = s => String(s ?? '').split(':').reduce((acc, p) => acc * 60 + (p
 const fmtPace = sPerKm => `${Math.floor(sPerKm / 60)}:${String(Math.round(sPerKm % 60)).padStart(2, '0')}`;
 const dateKey = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 
+// Running's goal score is pace-based (faster = higher), carried forward from
+// the most recent day you ran at all — not limited to the 7-day bar window —
+// so a rest day doesn't reset it to zero.
+function paceGoalScore(kmByDate, secsByDate) {
+  const mostRecent = Object.keys(kmByDate)
+    .filter(k => kmByDate[k] > 0 && (secsByDate[k] || 0) > 0)
+    .sort()
+    .pop();
+  if (!mostRecent) return 0;
+  const paceSecsPerKm = secsByDate[mostRecent] / kmByDate[mostRecent];
+  const overMin = Math.max(0, (paceSecsPerKm - CONFIG.paceGoalSecPerKm) / 60);
+  return Math.max(0, Math.min(100, Math.round(100 - CONFIG.pacePenaltyPerMin * overMin)));
+}
+
 function buildGarminPayload(csvText, lastModified) {
   const rows = parseCSV(csvText);
   const header = rows.shift() || [];
@@ -243,23 +259,22 @@ function buildGarminPayload(csvText, lastModified) {
   }
 
   const days = lastNDays(7);
-  const kmByDay = Object.fromEntries(days.map(d => [dateKey(d), 0]));
   const todayKey = dateKey(new Date());
-  let todayKm = 0, todaySecs = 0, todayKcal = 0;
+  const allKm = {}, allSecs = {};
+  let todayKcal = 0;
 
   for (const r of rows) {
     if (!/running/i.test(r[iType] || '')) continue;
     const key = (r[iDate] || '').slice(0, 10);
-    if (!(key in kmByDay)) continue;
-    const km = csvNum(r[iDist]);
-    kmByDay[key] += km;
-    if (key === todayKey) {
-      todayKm += km;
-      todaySecs += csvSecs(r[iTime]);
-      todayKcal += csvNum(r[iCal]);
-    }
+    if (!key) continue;
+    allKm[key] = (allKm[key] || 0) + csvNum(r[iDist]);
+    allSecs[key] = (allSecs[key] || 0) + csvSecs(r[iTime]);
+    if (key === todayKey) todayKcal += csvNum(r[iCal]);
   }
 
+  const kmByDay = Object.fromEntries(days.map(d => [dateKey(d), allKm[dateKey(d)] || 0]));
+  const todayKm = kmByDay[todayKey];
+  const todaySecs = allSecs[todayKey] || 0;
   const weeklyKm = Object.values(kmByDay).reduce((a, b) => a + b, 0);
   const maxKm = Math.max(...Object.values(kmByDay));
 
@@ -272,7 +287,7 @@ function buildGarminPayload(csvText, lastModified) {
       : `No run yet today · ${weeklyKm.toFixed(1)} km this week`,
     score: Math.min(100, Math.round(100 * todayKm / CONFIG.dailyGoalKm)),
     processScore: Math.min(100, Math.round(100 * todayKm / CONFIG.dailyGoalKm)),
-    goalScore: Math.min(100, Math.round(100 * todayKm / CONFIG.dailyGoalKm)),
+    goalScore: paceGoalScore(allKm, allSecs),
     bars: days.map(d => maxKm ? Math.round(100 * kmByDay[dateKey(d)] / maxKm) : 0),
     days: days.map(d => 'SMTWTFS'[d.getDay()]),
   };
@@ -336,6 +351,12 @@ function buildManualRunPayload(days) {
   const maxKm = Math.max(...Object.values(kmByDay));
   const lastLoggedDate = keys.sort().pop(); // most recent entry, logged or not this week
 
+  const allKm = {}, allSecs = {};
+  for (const [key, entry] of Object.entries(log)) {
+    allKm[key] = entry.km;
+    allSecs[key] = entry.secs || 0;
+  }
+
   return {
     fetchedAt: new Date(`${lastLoggedDate}T23:59:59`).toISOString(),
     value: todayKm > 0 ? todayKm.toFixed(1) : '0',
@@ -345,7 +366,7 @@ function buildManualRunPayload(days) {
       : `No run yet today · ${weeklyKm.toFixed(1)} km this week`,
     score: Math.min(100, Math.round(100 * todayKm / CONFIG.dailyGoalKm)),
     processScore: Math.min(100, Math.round(100 * todayKm / CONFIG.dailyGoalKm)),
-    goalScore: Math.min(100, Math.round(100 * todayKm / CONFIG.dailyGoalKm)),
+    goalScore: paceGoalScore(allKm, allSecs),
     bars: days.map(d => maxKm ? Math.round(100 * kmByDay[dateKey(d)] / maxKm) : 0),
     days: days.map(d => 'SMTWTFS'[d.getDay()]),
   };
@@ -389,8 +410,13 @@ function derive(data) {
   const process = weightSum ? Math.round(total / weightSum) : 0;
 
   const active = Object.values(data.sources).filter(s => s != null);
-  const goals = active.length
-    ? Math.round(active.reduce((sum, s) => sum + goalOf(s), 0) / active.length)
+
+  // Goals only reflects Running (now pace-based) and Weight — Sleep and
+  // Calories still show their own goal number on their cards, they just
+  // don't feed the top-level Goals ring.
+  const goalSources = [data.sources.run, data.sources.weight].filter(s => s != null);
+  const goals = goalSources.length
+    ? Math.round(goalSources.reduce((sum, s) => sum + goalOf(s), 0) / goalSources.length)
     : 0;
   return {
     process, goals,
