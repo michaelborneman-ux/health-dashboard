@@ -11,7 +11,7 @@ import os
 import sys
 from datetime import date, datetime, timedelta
 
-WEEKLY_GOAL_KM = 25          # sub-score = weekly km vs this goal, capped at 100
+DAILY_GOAL_KM = 2.5          # sub-score = today's km vs this goal, capped at 100
 CSV_FILE = os.path.expanduser("~/Downloads/Activities.csv")
 OUT_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "public", "data", "garmin-data.js")
 
@@ -74,7 +74,7 @@ def main():
                 today_kcal += num(row.get("Calories"))
 
     weekly_km = sum(km_by_day.values())
-    score = min(100, round(100 * weekly_km / WEEKLY_GOAL_KM))
+    score = min(100, round(100 * today_km / DAILY_GOAL_KM))
 
     max_km = max(km_by_day.values())
     bars = [round(100 * km_by_day[d] / max_km) if max_km else 0 for d in days]
@@ -108,7 +108,8 @@ def main():
     with open(OUT_FILE, "w", encoding="utf-8") as f:
         f.write("window.GARMIN_DATA = " + json.dumps(payload, indent=2) + ";\n")
 
-    print(f"OK: {runs} run(s) in the last 7 days, {weekly_km:.1f} km total, score {score}.")
+    print(f"OK: {runs} run(s) in the last 7 days, {weekly_km:.1f} km total, "
+          f"today {today_km:.1f} km vs {DAILY_GOAL_KM} km goal, score {score}.")
     print(f"(CSV: {total_rows} activities, exported {exported:%Y-%m-%d %H:%M})")
     print(f"Wrote {OUT_FILE}")
 

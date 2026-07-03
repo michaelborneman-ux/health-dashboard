@@ -148,7 +148,7 @@ const CONFIG = {
   userName: 'Michael',
   accent: '#e07a4f',        // alternates: #c9736a, #5fa06a, #7b74c9
   encouragement: true,
-  weeklyGoalKm: 25,         // running sub-score = weekly km vs this goal
+  dailyGoalKm: 2.5,         // running sub-score = today's km vs this goal
 };
 
 const SOURCE_META = {
@@ -270,9 +270,9 @@ function buildGarminPayload(csvText, lastModified) {
     sub: todayKm > 0
       ? `Avg pace ${fmtPace(todaySecs / todayKm)} /km · ${Math.round(todayKcal)} kcal`
       : `No run yet today · ${weeklyKm.toFixed(1)} km this week`,
-    score: Math.min(100, Math.round(100 * weeklyKm / CONFIG.weeklyGoalKm)),
-    processScore: Math.min(100, Math.round(100 * weeklyKm / CONFIG.weeklyGoalKm)),
-    goalScore: Math.min(100, Math.round(100 * weeklyKm / CONFIG.weeklyGoalKm)),
+    score: Math.min(100, Math.round(100 * todayKm / CONFIG.dailyGoalKm)),
+    processScore: Math.min(100, Math.round(100 * todayKm / CONFIG.dailyGoalKm)),
+    goalScore: Math.min(100, Math.round(100 * todayKm / CONFIG.dailyGoalKm)),
     bars: days.map(d => maxKm ? Math.round(100 * kmByDay[dateKey(d)] / maxKm) : 0),
     days: days.map(d => 'SMTWTFS'[d.getDay()]),
   };
@@ -343,9 +343,9 @@ function buildManualRunPayload(days) {
     sub: todayKm > 0
       ? `Avg pace ${fmtPace(todaySecs / todayKm)} /km · ${Math.round(todayKcal)} kcal`
       : `No run yet today · ${weeklyKm.toFixed(1)} km this week`,
-    score: Math.min(100, Math.round(100 * weeklyKm / CONFIG.weeklyGoalKm)),
-    processScore: Math.min(100, Math.round(100 * weeklyKm / CONFIG.weeklyGoalKm)),
-    goalScore: Math.min(100, Math.round(100 * weeklyKm / CONFIG.weeklyGoalKm)),
+    score: Math.min(100, Math.round(100 * todayKm / CONFIG.dailyGoalKm)),
+    processScore: Math.min(100, Math.round(100 * todayKm / CONFIG.dailyGoalKm)),
+    goalScore: Math.min(100, Math.round(100 * todayKm / CONFIG.dailyGoalKm)),
     bars: days.map(d => maxKm ? Math.round(100 * kmByDay[dateKey(d)] / maxKm) : 0),
     days: days.map(d => 'SMTWTFS'[d.getDay()]),
   };
@@ -479,7 +479,7 @@ function metricCardHTML(key, s) {
       <button class="log-run-btn" type="button">+ Log a run</button>
       <form class="log-run-form" hidden>
         <input class="lr-date" type="date" value="${dateKey(new Date())}" required>
-        <input class="lr-km" type="number" step="0.1" min="0" placeholder="km" required>
+        <input class="lr-km" type="number" step="0.01" min="0" placeholder="km" required>
         <input class="lr-time" type="text" placeholder="mm:ss">
         <input class="lr-kcal" type="number" min="0" placeholder="kcal">
         <button type="submit">Save</button>
